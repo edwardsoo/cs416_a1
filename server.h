@@ -14,6 +14,8 @@ typedef enum {CMD_NONE = 0, CMD_UPTIME, CMD_LOAD, CMD_NUMBER, CMD_EXIT} command;
 
 typedef struct thread_args {
   int sock;
+  int *num_conn;
+  pthread_mutex_t *mutex;
 } thread_args;
 
 

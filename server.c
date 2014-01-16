@@ -72,11 +72,15 @@ int create_server_socket(char* port) {
 void* handle_client(void *args_ptr) {
   command cmd = CMD_NONE;
   unsigned int sum, next_pos, prev_err;
-  int msg_len, sock;
+  int msg_len, sock, *num_conn;
   char c, msg_buf[SEND_BUFLEN];
+  pthread_mutex_t *mutex;
 
   sock = ((thread_args*) args_ptr)->sock;
-  printf("handle client\n");
+  num_conn = ((thread_args*) args_ptr)->num_conn;
+  mutex = ((thread_args*) args_ptr)->mutex;
+
+  //printf("handle client\n");
   next_pos = 0;
   prev_err = 0;
 
@@ -85,7 +89,8 @@ void* handle_client(void *args_ptr) {
       fprintf(stderr, "rev() failed with errno %d\n", errno);
       goto done;
     }
-    printf("%c", c);
+
+    printf("%c\n", c);
 
     switch (cmd) {
       case CMD_NONE:
@@ -132,6 +137,26 @@ void* handle_client(void *args_ptr) {
         }
         break;
       case CMD_LOAD:
+        if (next_pos == strlen(LOAD) - 1 && c == LOAD[next_pos]) {
+          pthread_mutex_lock(mutex);
+          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", *num_conn);
+          pthread_mutex_unlock(mutex);
+          if (send(sock, msg_buf, msg_len, 0) < 0) {
+            goto done;
+          }
+          prev_err = 0;
+          cmd = CMD_NONE;
+
+        } else if (c == LOAD[next_pos]) {
+          next_pos++;
+
+        } else {
+          prev_err++;
+          if (send(sock, "-1\n", 3, 0) < 0) {
+            goto done;
+          }
+        }
+        break;
       case CMD_NUMBER:
         if (c >= 48 && c <= 57) {
           sum += (c - 48);
@@ -181,14 +206,16 @@ void* handle_client(void *args_ptr) {
 
     }
 
-    printf("# consecutive errors %d\n", prev_err);
     if (prev_err >= 2) {
       goto done;
     }
   }
 
   done:
-  printf("closing connection to client...\n");
+  printf("closing connection to a client\n");
+  pthread_mutex_lock(mutex);
+  (*num_conn)--;
+  pthread_mutex_unlock(mutex);
   free(args_ptr);
   close(sock);
   return NULL;
@@ -202,6 +229,7 @@ int main(int argc, char *argv[]) {
   socklen_t size;
   pthread_t thread_id;
   thread_args *thread_args;
+  pthread_mutex_t mutex;
 
   if (argc < 3) {
     fprintf(stderr, "Usage:\n\t%s MAX_NUM_CLIENTS PORT_NUMBER\n", argv[0]);
@@ -211,6 +239,9 @@ int main(int argc, char *argv[]) {
   max_conn = atoi(argv[1]);
   num_conn = 0;
 
+  // Init mutex for num_conn
+  pthread_mutex_init(&mutex, NULL);
+
   // Create a listening socket
   serv_sock = create_server_socket(argv[2]);
   size = sizeof(their_addr);
@@ -218,29 +249,35 @@ int main(int argc, char *argv[]) {
   // Ignore SIGPIPE; does nothing when writing to broken pipe
   signal(SIGPIPE, SIG_IGN);
 
+  printf("Listening for connection...\n");
   while (1) {
-    printf("Listening for connection...\n");
     clnt_sock = accept(serv_sock, (struct sockaddr*) &their_addr, &size);
     if (clnt_sock < 0) {
       continue;
     }
 
     // Max number of connections reached, terminate this connection
+    pthread_mutex_lock(&mutex);
     if (num_conn >= max_conn) {
+      printf("Maximum number of connection had been reached\n");
       close(clnt_sock);
-
 
     // Create child thread to handle client
     } else {
       thread_args = malloc(sizeof(thread_args));
       thread_args->sock = clnt_sock;
+      thread_args->num_conn = &num_conn;
+      thread_args->mutex = &mutex;
       rc = pthread_create(&thread_id, NULL, handle_client, thread_args);
       if (rc != 0) {
         fprintf(stderr, "pthread_created() failed");
         exit(1);
       }
+      num_conn++;
     }
- }
+    pthread_mutex_unlock(&mutex);
+  }
 
+  pthread_mutex_destroy(&mutex);
   return 0;
 }
