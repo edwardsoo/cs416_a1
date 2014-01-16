@@ -90,8 +90,6 @@ void* handle_client(void *args_ptr) {
       goto done;
     }
 
-    printf("%c\n", c);
-
     switch (cmd) {
       case CMD_NONE:
         if (c == UPTIME[0]) {
@@ -269,6 +267,7 @@ int main(int argc, char *argv[]) {
       thread_args->num_conn = &num_conn;
       thread_args->mutex = &mutex;
       rc = pthread_create(&thread_id, NULL, handle_client, thread_args);
+      printf("Accepted a connection\n");
       if (rc != 0) {
         fprintf(stderr, "pthread_created() failed");
         exit(1);
