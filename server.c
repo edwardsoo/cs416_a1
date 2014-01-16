@@ -69,6 +69,10 @@ int create_server_socket(char* port) {
   return sock;
 }
 
+int is_digit(char c) {
+  return (c >= 48 && c <= 57);
+}
+
 void* handle_client(void *args_ptr) {
   command cmd = CMD_NONE;
   unsigned int sum, next_pos, prev_err;
@@ -80,13 +84,17 @@ void* handle_client(void *args_ptr) {
   num_conn = ((thread_args*) args_ptr)->num_conn;
   mutex = ((thread_args*) args_ptr)->mutex;
 
-  //printf("handle client\n");
   next_pos = 0;
   prev_err = 0;
 
   while (1) {
     if (recv(sock, &c, 1, 0) == -1) {
       fprintf(stderr, "rev() failed with errno %d\n", errno);
+      goto done;
+    }
+
+new_cmd:
+    if (prev_err >= 2) {
       goto done;
     }
 
@@ -104,7 +112,7 @@ void* handle_client(void *args_ptr) {
           cmd = CMD_EXIT;
           next_pos = 1;
 
-        } else if (c >= 48 && c <= 57) {
+        } else if (is_digit(c)) {
           cmd = CMD_NUMBER;
           sum = (c - 48);
 
@@ -132,6 +140,8 @@ void* handle_client(void *args_ptr) {
           if (send(sock, "-1\n", 3, 0) < 0) {
             goto done;
           }
+          cmd = CMD_NONE;
+          goto new_cmd;
         }
         break;
       case CMD_LOAD:
@@ -153,13 +163,24 @@ void* handle_client(void *args_ptr) {
           if (send(sock, "-1\n", 3, 0) < 0) {
             goto done;
           }
+          cmd = CMD_NONE;
+          goto new_cmd;
         }
         break;
       case CMD_NUMBER:
-        if (c >= 48 && c <= 57) {
+        if (is_digit(c)) {
           sum += (c - 48);
 
         } else if (c == UPTIME[0] || c == LOAD[0] || c == EXIT[0]) {
+          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
+          if (send(sock, msg_buf, msg_len, 0) < 0) {
+            goto done;
+          }
+          prev_err = 0;
+          cmd = CMD_NONE;
+          goto new_cmd;
+
+          // DEAD CODE
           if (c == UPTIME[0])
             cmd = CMD_UPTIME;
           else if (c == LOAD[0])
@@ -168,11 +189,6 @@ void* handle_client(void *args_ptr) {
             cmd = CMD_EXIT;
 
           next_pos = 1;
-          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
-          if (send(sock, msg_buf, msg_len, 0) < 0) {
-            goto done;
-          }
-          prev_err = 0;
 
         } else {
           prev_err++;
@@ -184,6 +200,8 @@ void* handle_client(void *args_ptr) {
           if (send(sock, "-1\n", 3, 0) < 0) {
             goto done;
           }
+          cmd = CMD_NONE;
+          goto new_cmd;
         }
         break;
       case CMD_EXIT:
@@ -199,14 +217,13 @@ void* handle_client(void *args_ptr) {
           if (send(sock, "-1\n", 3, 0) < 0) {
             goto done;
           }
+          cmd = CMD_NONE;
+          goto new_cmd;
         }
         break;
 
     }
 
-    if (prev_err >= 2) {
-      goto done;
-    }
   }
 
   done:
