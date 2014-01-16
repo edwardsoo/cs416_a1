@@ -16,6 +16,8 @@
 #include <netinet/in.h>
 #include "server.h"
 
+const char *cmd_str[] = {"", "uptime", "load", "", "exit"};
+
 int create_server_socket(char* port) {
   int sock;
   int rc;
@@ -88,8 +90,9 @@ void* handle_client(void *args_ptr) {
   prev_err = 0;
 
   while (1) {
-    if (recv(sock, &c, 1, 0) == -1) {
-      fprintf(stderr, "rev() failed with errno %d\n", errno);
+    // TODO set timer before blocking
+    if (recv(sock, &c, 1, 0) <= 0) {
+      fprintf(stderr, "recv() failed with errno %d\n", errno);
       goto done;
     }
 
@@ -124,38 +127,33 @@ new_cmd:
         }
         break;
       case CMD_UPTIME:
-        if (next_pos == strlen(UPTIME) - 1 && c == UPTIME[next_pos]) {
-          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%lu\n", time(NULL));
-          if (send(sock, msg_buf, msg_len, 0) < 0) {
-            goto done;
-          }
-          prev_err = 0;
-          cmd = CMD_NONE;
-
-        } else if (c == UPTIME[next_pos]) {
-          next_pos++;
-
-        } else {
-          prev_err++;
-          if (send(sock, "-1\n", 3, 0) < 0) {
-            goto done;
-          }
-          cmd = CMD_NONE;
-          goto new_cmd;
-        }
-        break;
       case CMD_LOAD:
-        if (next_pos == strlen(LOAD) - 1 && c == LOAD[next_pos]) {
-          pthread_mutex_lock(mutex);
-          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", *num_conn);
-          pthread_mutex_unlock(mutex);
-          if (send(sock, msg_buf, msg_len, 0) < 0) {
+      case CMD_EXIT:
+        
+        if (next_pos == strlen(cmd_str[cmd]) - 1 && c == cmd_str[cmd][next_pos]) {
+          if (cmd == CMD_UPTIME) {
+            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%lu\n", time(NULL));
+            if (send(sock, msg_buf, msg_len, 0) < 0) {
+              goto done;
+            }
+
+          } else if (cmd == CMD_LOAD) {
+            pthread_mutex_lock(mutex);
+            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", *num_conn);
+            pthread_mutex_unlock(mutex);
+            if (send(sock, msg_buf, msg_len, 0) < 0) {
+              goto done;
+            }
+
+          } else {
+            send(sock, "0\n", 2, 0);
             goto done;
           }
+
           prev_err = 0;
           cmd = CMD_NONE;
 
-        } else if (c == LOAD[next_pos]) {
+        } else if (c == cmd_str[cmd][next_pos]) {
           next_pos++;
 
         } else {
@@ -171,59 +169,28 @@ new_cmd:
         if (is_digit(c)) {
           sum += (c - 48);
 
-        } else if (c == UPTIME[0] || c == LOAD[0] || c == EXIT[0]) {
+        } else {
           msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
           if (send(sock, msg_buf, msg_len, 0) < 0) {
             goto done;
           }
           prev_err = 0;
-          cmd = CMD_NONE;
-          goto new_cmd;
 
-          // DEAD CODE
-          if (c == UPTIME[0])
-            cmd = CMD_UPTIME;
-          else if (c == LOAD[0])
-            cmd = CMD_LOAD;
-          else
-            cmd = CMD_EXIT;
+          // if (c == UPTIME[0] || c == LOAD[0] || c == EXIT[0]) {
+          //   prev_err = 0;
 
-          next_pos = 1;
+          // } else {
+          //   prev_err++;
+          //   if (send(sock, "-1\n", 3, 0) < 0) {
+          //     goto done;
+          //   }
+          // }
 
-        } else {
-          prev_err++;
-          cmd = CMD_NONE;
-          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
-          if (send(sock, msg_buf, msg_len, 0) < 0) {
-            goto done;
-          }
-          if (send(sock, "-1\n", 3, 0) < 0) {
-            goto done;
-          }
           cmd = CMD_NONE;
           goto new_cmd;
         }
         break;
-      case CMD_EXIT:
-        if (next_pos == strlen(EXIT) - 1 && c == EXIT[next_pos]) {
-          send(sock, "0\n", 2, 0);
-          goto done;
-
-        } else if (c == EXIT[next_pos]) {
-          next_pos++;
-
-        } else {
-          prev_err++;
-          if (send(sock, "-1\n", 3, 0) < 0) {
-            goto done;
-          }
-          cmd = CMD_NONE;
-          goto new_cmd;
-        }
-        break;
-
     }
-
   }
 
   done:
