@@ -3,6 +3,7 @@
 
 #define BACKLOG     10
 #define SEND_BUFLEN 0x40
+#define TIMEOUT     5
 
 #define UPTIME  "uptime"
 #define LOAD    "load"
@@ -17,11 +18,11 @@ typedef struct thread_arg {
   int heartbeat;
 } thread_arg;
 
-typedef struct list {
+typedef struct thread_list {
   pthread_t thread_id;
   thread_arg *arg;
-  struct list *next;
-} list;
+  struct thread_list *next;
+} thread_list;
 
 int create_server_socket(char* port);
 void* handle_client(void *args_ptr);

@@ -19,6 +19,7 @@
 const char *cmd_str[] = {"", "uptime", "load", "", "exit"};
 pthread_mutex_t mutex;
 int num_conn;
+thread_list *list;
 
 int create_server_socket(char* port) {
   int sock;
@@ -82,8 +83,42 @@ void cleanup_routine(void* ptr) {
   num_conn--;
   pthread_mutex_unlock(&mutex);
   close(((thread_arg*) ptr)->sock);
-  free(ptr);
+  ((thread_arg*) ptr)->heartbeat = 0;
   printf("Closed connection to a client\n");
+}
+
+void* check_liveness(void* ptr) {
+  thread_list **pp, *p;
+  int now;
+
+  while (1) {
+    now = time(NULL);
+    // printf("now %i\n", now);
+    pp = &list;
+
+    // For each active connection, check last heartbeat
+    while (*pp != NULL) {
+      p = *pp;
+      // printf("last heartbeat %i\n", p->arg->heartbeat);
+
+      // Last heartbeat was more than TIMEOUT ago
+      if (now > p->arg->heartbeat + TIMEOUT) {
+        if (p->arg->heartbeat) {
+          printf("A connection has been idle for too long\n");
+        }
+        pthread_cancel(p->thread_id);
+        pthread_join(p->thread_id, NULL);
+        *pp = p->next;
+        free(p->arg);
+        free(p);
+        
+      } else {
+        pp = &(p->next);
+      }
+    }
+    sleep(1);
+  }
+  return NULL;
 }
 
 void* handle_client(void *ptr) {
@@ -108,6 +143,9 @@ void* handle_client(void *ptr) {
       fprintf(stderr, "recv() failed with errno %d\n", errno);
       pthread_exit(NULL);
     }
+
+    // Update heartbeat
+    ((thread_arg*) ptr)->heartbeat = time(NULL);
 
 new_cmd:
     if (prev_err >= 2) {
@@ -207,8 +245,8 @@ int main(int argc, char *argv[]) {
   int max_conn;
   struct sockaddr_storage their_addr;
   socklen_t size;
-  pthread_t thread_id;
-  thread_arg *thread_arg;
+  pthread_t chk_live;
+  thread_list *l;
 
   if (argc < 3) {
     fprintf(stderr, "Usage:\n\t%s MAX_NUM_CLIENTS PORT_NUMBER\n", argv[0]);
@@ -217,6 +255,10 @@ int main(int argc, char *argv[]) {
 
   max_conn = atoi(argv[1]);
   num_conn = 0;
+
+  // Create a thread to check liveness of client connection
+  list = NULL;
+  pthread_create(&chk_live, NULL, check_liveness, NULL);
 
   // Init mutex for num_conn
   pthread_mutex_init(&mutex, NULL);
@@ -243,14 +285,18 @@ int main(int argc, char *argv[]) {
 
       // Create child thread to handle client
     } else {
-      thread_arg = malloc(sizeof(thread_arg));
-      thread_arg->sock = clnt_sock;
-      rc = pthread_create(&thread_id, NULL, handle_client, thread_arg);
+      l = malloc(sizeof(thread_list));
+      l->next = list;
+      l->arg = malloc(sizeof(thread_arg));
+      l->arg->sock = clnt_sock;
+      l->arg->heartbeat = time(NULL);
+      rc = pthread_create(&(l->thread_id), NULL, handle_client, l->arg);
       printf("Accepted a connection\n");
       if (rc != 0) {
         fprintf(stderr, "pthread_created() failed");
         exit(1);
       }
+      list = l;
       num_conn++;
     }
     pthread_mutex_unlock(&mutex);
