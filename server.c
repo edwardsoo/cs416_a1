@@ -1,6 +1,6 @@
 /*
-  Edward Soo 71680094
-*/
+   Edward Soo 71680094
+ */
 
 #include <errno.h>
 #include <string.h>
@@ -17,6 +17,8 @@
 #include "server.h"
 
 const char *cmd_str[] = {"", "uptime", "load", "", "exit"};
+pthread_mutex_t mutex;
+int num_conn;
 
 int create_server_socket(char* port) {
   int sock;
@@ -75,30 +77,41 @@ int is_digit(char c) {
   return (c >= 48 && c <= 57);
 }
 
-void* handle_client(void *args_ptr) {
+void cleanup_routine(void* ptr) {
+  pthread_mutex_lock(&mutex);
+  num_conn--;
+  pthread_mutex_unlock(&mutex);
+  close(((thread_arg*) ptr)->sock);
+  free(ptr);
+  printf("Closed connection to a client\n");
+}
+
+void* handle_client(void *ptr) {
   command cmd = CMD_NONE;
   unsigned int sum, next_pos, prev_err;
-  int msg_len, sock, *num_conn;
+  int msg_len, sock;
   char c, msg_buf[SEND_BUFLEN];
-  pthread_mutex_t *mutex;
 
-  sock = ((thread_args*) args_ptr)->sock;
-  num_conn = ((thread_args*) args_ptr)->num_conn;
-  mutex = ((thread_args*) args_ptr)->mutex;
+  pthread_cleanup_push(cleanup_routine, ptr);
+
+  sock = ((thread_arg*) ptr)->sock;
+
+  if (pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL) != 0) {
+    pthread_exit(NULL);
+  }
 
   next_pos = 0;
   prev_err = 0;
 
   while (1) {
-    // TODO set timer before blocking
     if (recv(sock, &c, 1, 0) <= 0) {
       fprintf(stderr, "recv() failed with errno %d\n", errno);
-      goto done;
+      pthread_exit(NULL);
     }
 
 new_cmd:
     if (prev_err >= 2) {
-      goto done;
+      pthread_exit(NULL);
     }
 
     switch (cmd) {
@@ -122,32 +135,32 @@ new_cmd:
         } else {
           prev_err++;
           if (send(sock, "-1\n", 3, 0) < 0) {
-            goto done;
+            pthread_exit(NULL);
           }
         }
         break;
       case CMD_UPTIME:
       case CMD_LOAD:
       case CMD_EXIT:
-        
         if (next_pos == strlen(cmd_str[cmd]) - 1 && c == cmd_str[cmd][next_pos]) {
           if (cmd == CMD_UPTIME) {
             msg_len = snprintf(msg_buf, SEND_BUFLEN, "%lu\n", time(NULL));
             if (send(sock, msg_buf, msg_len, 0) < 0) {
-              goto done;
+              pthread_exit(NULL);
             }
 
           } else if (cmd == CMD_LOAD) {
-            pthread_mutex_lock(mutex);
-            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", *num_conn);
-            pthread_mutex_unlock(mutex);
+            pthread_cleanup_push(pthread_mutex_unlock, (void*) &mutex);
+            pthread_mutex_lock(&mutex);
+            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", num_conn);
+            pthread_cleanup_pop(1);
             if (send(sock, msg_buf, msg_len, 0) < 0) {
-              goto done;
+              pthread_exit(NULL);
             }
 
           } else {
             send(sock, "0\n", 2, 0);
-            goto done;
+            pthread_exit(NULL);
           }
 
           prev_err = 0;
@@ -159,7 +172,7 @@ new_cmd:
         } else {
           prev_err++;
           if (send(sock, "-1\n", 3, 0) < 0) {
-            goto done;
+            pthread_exit(NULL);
           }
           cmd = CMD_NONE;
           goto new_cmd;
@@ -172,20 +185,10 @@ new_cmd:
         } else {
           msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
           if (send(sock, msg_buf, msg_len, 0) < 0) {
-            goto done;
+            pthread_exit(NULL);
           }
+
           prev_err = 0;
-
-          // if (c == UPTIME[0] || c == LOAD[0] || c == EXIT[0]) {
-          //   prev_err = 0;
-
-          // } else {
-          //   prev_err++;
-          //   if (send(sock, "-1\n", 3, 0) < 0) {
-          //     goto done;
-          //   }
-          // }
-
           cmd = CMD_NONE;
           goto new_cmd;
         }
@@ -193,25 +196,19 @@ new_cmd:
     }
   }
 
-  done:
-  printf("closing connection to a client\n");
-  pthread_mutex_lock(mutex);
-  (*num_conn)--;
-  pthread_mutex_unlock(mutex);
-  free(args_ptr);
-  close(sock);
+  // Should not reach here
+  pthread_cleanup_pop(1);
   return NULL;
 }
 
 int main(int argc, char *argv[]) {
   int rc;
   int serv_sock, clnt_sock;
-  int num_conn, max_conn;
+  int max_conn;
   struct sockaddr_storage their_addr;
   socklen_t size;
   pthread_t thread_id;
-  thread_args *thread_args;
-  pthread_mutex_t mutex;
+  thread_arg *thread_arg;
 
   if (argc < 3) {
     fprintf(stderr, "Usage:\n\t%s MAX_NUM_CLIENTS PORT_NUMBER\n", argv[0]);
@@ -244,13 +241,11 @@ int main(int argc, char *argv[]) {
       printf("Maximum number of connection had been reached\n");
       close(clnt_sock);
 
-    // Create child thread to handle client
+      // Create child thread to handle client
     } else {
-      thread_args = malloc(sizeof(thread_args));
-      thread_args->sock = clnt_sock;
-      thread_args->num_conn = &num_conn;
-      thread_args->mutex = &mutex;
-      rc = pthread_create(&thread_id, NULL, handle_client, thread_args);
+      thread_arg = malloc(sizeof(thread_arg));
+      thread_arg->sock = clnt_sock;
+      rc = pthread_create(&thread_id, NULL, handle_client, thread_arg);
       printf("Accepted a connection\n");
       if (rc != 0) {
         fprintf(stderr, "pthread_created() failed");

@@ -12,12 +12,16 @@
 
 typedef enum {CMD_NONE = 0, CMD_UPTIME, CMD_LOAD, CMD_NUMBER, CMD_EXIT} command;
 
-typedef struct thread_args {
+typedef struct thread_arg {
   int sock;
-  int *num_conn;
-  pthread_mutex_t *mutex;
-} thread_args;
+  int heartbeat;
+} thread_arg;
 
+typedef struct list {
+  pthread_t thread_id;
+  thread_arg *arg;
+  struct list *next;
+} list;
 
 int create_server_socket(char* port);
 void* handle_client(void *args_ptr);
