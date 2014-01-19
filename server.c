@@ -121,11 +121,21 @@ void* check_liveness(void* ptr) {
   return NULL;
 }
 
+void send_int32(int sock, int val) {
+  uint32_t nint = htonl(val);
+  printf("sending integer %d\n", val);
+  if (write(sock, &nint, sizeof(nint)) < sizeof(nint)) {
+    pthread_exit(NULL);
+  }
+}
+
 void* handle_client(void *ptr) {
   command cmd = CMD_NONE;
   unsigned int sum, next_pos, prev_err;
-  int msg_len, sock;
-  char c, msg_buf[SEND_BUFLEN];
+  int sock;
+  char c;
+  // char msg_buf[SEND_BUFLEN];
+  // int msg_len;
 
   pthread_cleanup_push(cleanup_routine, ptr);
 
@@ -172,9 +182,10 @@ new_cmd:
 
         } else {
           prev_err++;
-          if (send(sock, "-1\n", 3, 0) < 0) {
-            pthread_exit(NULL);
-          }
+          send_int32(sock, -1);
+          // if (send(sock, "-1\n", 3, 0) < 0) {
+          //   pthread_exit(NULL);
+          // }
         }
         break;
       case CMD_UPTIME:
@@ -182,22 +193,26 @@ new_cmd:
       case CMD_EXIT:
         if (next_pos == strlen(cmd_str[cmd]) - 1 && c == cmd_str[cmd][next_pos]) {
           if (cmd == CMD_UPTIME) {
-            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%lu\n", time(NULL));
-            if (send(sock, msg_buf, msg_len, 0) < 0) {
-              pthread_exit(NULL);
-            }
+         
+            send_int32(sock, time(NULL)); 
+            // msg_len = snprintf(msg_buf, SEND_BUFLEN, "%lu\n", time(NULL));
+            // if (send(sock, msg_buf, msg_len, 0) < 0) {
+            //   pthread_exit(NULL);
+            // }
 
           } else if (cmd == CMD_LOAD) {
             pthread_cleanup_push(pthread_mutex_unlock, (void*) &mutex);
             pthread_mutex_lock(&mutex);
-            msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", num_conn);
+            send_int32(sock, num_conn);
+            // msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", num_conn);
+            // if (send(sock, msg_buf, msg_len, 0) < 0) {
+            //   pthread_exit(NULL);
+            // }
             pthread_cleanup_pop(1);
-            if (send(sock, msg_buf, msg_len, 0) < 0) {
-              pthread_exit(NULL);
-            }
 
           } else {
-            send(sock, "0\n", 2, 0);
+            send_int32(sock, 0);
+            // send(sock, "0\n", 2, 0);
             pthread_exit(NULL);
           }
 
@@ -209,9 +224,10 @@ new_cmd:
 
         } else {
           prev_err++;
-          if (send(sock, "-1\n", 3, 0) < 0) {
-            pthread_exit(NULL);
-          }
+          send_int32(sock, -1);
+          // if (send(sock, "-1\n", 3, 0) < 0) {
+          //   pthread_exit(NULL);
+          // }
           cmd = CMD_NONE;
           goto new_cmd;
         }
@@ -221,10 +237,11 @@ new_cmd:
           sum += (c - 48);
 
         } else {
-          msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
-          if (send(sock, msg_buf, msg_len, 0) < 0) {
-            pthread_exit(NULL);
-          }
+          send_int32(sock, sum);
+          // msg_len = snprintf(msg_buf, SEND_BUFLEN, "%u\n", sum);
+          // if (send(sock, msg_buf, msg_len, 0) < 0) {
+          //   pthread_exit(NULL);
+          // }
 
           prev_err = 0;
           cmd = CMD_NONE;
