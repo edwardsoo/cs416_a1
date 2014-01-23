@@ -201,7 +201,8 @@ new_cmd:
             // }
 
           } else if (cmd == CMD_LOAD) {
-            pthread_cleanup_push(pthread_mutex_unlock, (void*) &mutex);
+            pthread_cleanup_push((void (*)(void*)) pthread_mutex_unlock,
+                (void*) &mutex);
             pthread_mutex_lock(&mutex);
             send_int32(sock, num_conn);
             // msg_len = snprintf(msg_buf, SEND_BUFLEN, "%d\n", num_conn);
