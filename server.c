@@ -122,7 +122,9 @@ void* check_liveness(void* ptr) {
 }
 
 void send_int32(int sock, int val) {
-  uint32_t nint = htonl(val);
+  uint32_t nint;
+  //nint = htonl(val);
+  nint = val;
   printf("sending integer %d\n", val);
   if (write(sock, &nint, sizeof(nint)) < sizeof(nint)) {
     pthread_exit(NULL);
@@ -158,7 +160,7 @@ void* handle_client(void *ptr) {
     ((thread_arg*) ptr)->heartbeat = time(NULL);
 
 new_cmd:
-    if (prev_err >= 2) {
+    if (prev_err > 2) {
       pthread_exit(NULL);
     }
 
@@ -183,9 +185,6 @@ new_cmd:
         } else {
           prev_err++;
           send_int32(sock, -1);
-          // if (send(sock, "-1\n", 3, 0) < 0) {
-          //   pthread_exit(NULL);
-          // }
         }
         break;
       case CMD_UPTIME:
@@ -248,6 +247,9 @@ new_cmd:
           goto new_cmd;
         }
         break;
+    }
+    if (prev_err > 2) {
+      pthread_exit(NULL);
     }
   }
 
